@@ -56,9 +56,11 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}   ${OpenMP_C_FLAGS}")
 find_package(PythonLibs REQUIRED)
 find_path(MATPLOTLIB_CPP_INCLUDE_DIRS "matplotlibcpp.h")
 
-find_package(Glog REQUIRED)
+# glog：无可靠 GlogConfig.cmake，且部分环境没有 FindGlog.cmake；用 pkg-config 与 Debian 包一致。
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GLOG REQUIRED libglog)
 find_package(gflags REQUIRED)
-set(LOG_LIB glog::glog gflags)
+set(LOG_LIB ${GLOG_LIBRARIES} gflags)
 
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
@@ -77,6 +79,12 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(Eigen3 REQUIRED)
 find_package(PCL 1.8 REQUIRED)
 #find_package(GTSAM REQUIRED QUIET)
+
+# VoxelHashMap 等使用 Intel TBB，仅包含头文件会在链接阶段报 undefined reference
+find_library(TBB_LIBRARY NAMES tbb)
+if(NOT TBB_LIBRARY)
+  message(FATAL_ERROR "libtbb not found (Ubuntu: sudo apt install libtbb-dev)")
+endif()
 
 message(Eigen: ${EIGEN3_INCLUDE_DIR})
 
@@ -104,8 +112,8 @@ catkin_package(
 )
 
 add_executable(btsa_node src/voxelMapping.cpp src/preprocess.cpp)
-target_link_libraries(btsa_node ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} ${LOG_LIB})
-target_include_directories(btsa_node PRIVATE ${PYTHON_INCLUDE_DIRS})
+target_link_libraries(btsa_node ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} ${LOG_LIB} ${TBB_LIBRARY})
+target_include_directories(btsa_node PRIVATE ${PYTHON_INCLUDE_DIRS} ${GLOG_INCLUDE_DIRS})
 
 add_executable(pandar_to_velodyne src/converter/pandar_to_velodyne.cpp)
 target_link_libraries(pandar_to_velodyne ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES})

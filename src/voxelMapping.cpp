@@ -312,7 +312,10 @@ void SpatialConsistencyCheck(){
         if (dimensions[2] / dimensions[1] >= 10.0) continue;
 
 
-        PointType cluster_center_point(obj.state[0], obj.state[1], obj.state[2]);
+        PointType cluster_center_point;
+        cluster_center_point.x = static_cast<float>(obj.state[0]);
+        cluster_center_point.y = static_cast<float>(obj.state[1]);
+        cluster_center_point.z = static_cast<float>(obj.state[2]);
         Eigen::Vector3f cluster_scale = cluster_max.cast<float>() - cluster_min.cast<float>();
         float diagonal = (cluster_max - cluster_min).norm() / 2;
 
