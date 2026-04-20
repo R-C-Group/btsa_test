@@ -1,0 +1,78 @@
+common:
+    lid_topic:  "/livox/lidar"
+    imu_topic:  "/livox/imu"
+    time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
+
+preprocess:
+    lidar_type: 4                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR,
+    scan_line: 4
+    scan_rate: 10
+    blind: 0.5
+    point_filter_num: 1
+
+mapping:
+    down_sample_size: 0.3
+    max_iteration: 3
+    voxel_size: 0.5
+    max_layer: 4                # 4 layer, 0, 1, 2, 3
+    layer_point_size: [ 5, 5, 5, 5, 5 ]
+    plannar_threshold: 0.01
+    max_points_size: 1000
+    max_cov_points_size: 1000
+
+    fov_degree:    360
+    det_range:     100.0
+    extrinsic_est_en:  false      # true: enable the online estimation of IMU-LiDAR extrinsic,
+    extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
+    extrinsic_R: [ 1, 0, 0,
+                   0, 1, 0,
+                   0, 0, 1]
+
+noise_model:
+    # ranging_cov: 0.04
+    # angle_cov: 0.1
+    # acc_cov: 1.0
+    # gyr_cov: 0.5
+    # b_acc_cov: 0.001
+    # b_gyr_cov: 0.001
+    # ranging_cov: 0.04
+    # angle_cov: 0.1
+    # acc_cov: 1.0
+    # gyr_cov: 0.5
+    # b_acc_cov: 0.001
+    # b_gyr_cov: 0.001
+    ranging_cov: 0.02
+    angle_cov: 0.05
+    acc_cov: 0.5
+    gyr_cov: 0.25
+    b_acc_cov: 0.0043
+    b_gyr_cov: 0.000266
+
+
+publish:
+    pub_voxel_map: false
+    publish_max_voxel_layer: 2         # only publish 0,1,2 layer's plane
+    path_en:  true
+    scan_publish_en:  true       # false: close all the point cloud output
+    dense_publish_en: false       # false: low down the points number in a global-frame point clouds scan.
+    scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame
+
+pcd_save:
+    pcd_save_en: false
+    interval: -1                 # how many LiDAR frames saved in each pcd file; 
+                                 # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.
+btsa:
+    time_slice: 20              # time slice for scan matching and dynamic object detection in the ikdtree
+    vel_thre: 0.2          # velocity threshold for dynamic object detection
+    range_x: 100
+    range_y: 100
+    range_z: 5
+    filter_size_map: 0.4
+    match_points: 20
+    if_detect_drop: true
+    detect_cnt_thre: 3
+    use_radius_search: false    # use radius search for dynamic object detection
+    neighborhood_size: 15      # neighborhood size for dynamic object detection
+    neighbourhood_radius: 0.2           # min neighbors for dynamic object detection
+    scc_voxel_size: 0.2
+    scc_voxel_time: 2
