@@ -2,12 +2,18 @@
     <!-- Launch file for dynamic dataset -->
 
     <arg name="rviz" default="true"/>
+    <!-- debug:=true 时用 gdb 启动 btsa_node；崩溃后停在 gdb，输入 bt 看栈 -->
     <arg name="debug" default="false"/>
 
     <rosparam command="load" file="$(find btsa)/config/dynamic.yaml"/>
 
-    <group if="$(eval arg('debug') == False)">
+    <group unless="$(arg debug)">
         <node pkg="btsa" type="btsa_node" name="btsa_node" output="screen"/>
+    </group>
+    <group if="$(arg debug)">
+        <!-- 用 bash 调脚本：避免未装 gdb 时 roslaunch 报 “No such file”；脚本内再 exec gdb -->
+        <node pkg="btsa" type="btsa_node" name="btsa_node" output="screen"
+              launch-prefix="/bin/bash $(find btsa)/scripts/run_under_gdb.sh"/>
     </group>
 
     <group if="$(arg rviz)">
@@ -17,12 +23,12 @@
 
     <!-- run bag -->
     <arg name="bag_file_use" default="true" />
-    <arg name="bag_file" default="/media/shigezhuti/SATA1/btsa/scan/dynamic/Promenade03.bag" />
+    <arg name="bag_file" default="/home/kwanwaipang/datasets/btsa_data/_Promenade03.bag" />
 
     <param name="use_sim_time" value="false" />
     <group if="$(arg bag_file_use)">
         <node pkg="rosbag" type="play" name="rosbag" 
-            args="--clock -r 1 -s 0 $(arg bag_file)" required="true"/>    
+            args="--clock --pause -r 1 -s 0 $(arg bag_file)" required="true"/>    
     </group>    
 
 </launch>

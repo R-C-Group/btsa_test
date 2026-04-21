@@ -68,6 +68,7 @@
 #include <pcl/kdtree/kdtree_flann.h>
 #include <unordered_set>
 #include <pcl/filters/extract_indices.h>
+#include <filesystem>
 
 #define INIT_TIME           (0.1)
 #define LASER_POINT_COV     (0.001)
@@ -206,6 +207,8 @@ shared_ptr<ImuProcess> p_imu(new ImuProcess());
 //scan
 void dynamic_detection_upsampling(){
     if (!flg_dynamic_detect) return;
+    if (!feats_undistort_world || feats_undistort_world->empty()) return;
+    if (!feats_down_world || feats_down_world->empty()) return;
 
     // Build a PCL kd-tree for the current map points.
     pcl::KdTreeFLANN<PointType> kdTree;
@@ -220,6 +223,7 @@ void dynamic_detection_upsampling(){
     dynamic_indices_temp.clear();
     for (size_t i = 0; i < feats_down_world->points.size(); ++i)
     {
+        if (i >= static_cast<size_t>(dynamic_scores.size())) break;
         if (dynamic_scores(i) >= vel_thre)
         {
             if(use_radius_search_){
@@ -264,6 +268,7 @@ void dynamic_detection_upsampling(){
 
 void SpatialConsistencyCheck(){
     if (!flg_dynamic_detect) return;
+    if (!feats_dynamic || feats_dynamic->empty()) return;
     pcl::search::KdTree<PointType>::Ptr tree(new pcl::search::KdTree<PointType>);
     tree->setInputCloud(feats_dynamic);
 
@@ -412,6 +417,7 @@ void puslish_unstable_points(const ros::Publisher & pubLaserCloudUnstable)
 
 inline void dump_lio_state_to_log(FILE *fp)  
 {
+    if (fp == nullptr) return;
     V3D rot_ang(Log(state_point.rot.toRotationMatrix()));
     geometry_msgs::Quaternion q_debug = tf::createQuaternionMsgFromRollPitchYaw(rot_ang(0),rot_ang(1),rot_ang(2));
     fprintf( fp, "%lf ", Measures.lidar_beg_time); // Time   [0]
@@ -935,18 +941,30 @@ void observation_model_share(state_ikfom &s, esekfom::dyn_share_datastruct<doubl
                 std::vector<float> pointSearchSqDis(match_points_num);
                 PointType &point_world = world_lidar->points[i];
                 PointVector points_near;
-                ikdtree.Nearest_Search(point_world, match_points_num, points_near, pointSearchSqDis);
-                // point_selected_surf_[i] = points_near.size() < match_points_num ? false : pointSearchSqDis[match_points_num - 1] > 5 ? false : true;
-                VF(4) pabcd_st;
-                VF(4) points_mean;
-                esti_stPlane(pabcd_st, points_mean, points_near, 0.1f);
-                if(abs(pabcd_st(3)) <= vel_thre) {
-                    // if (point_selected_surf_[i]) point_selected_surf_[i] = true;
+                if (ikdtree.Root_Node == nullptr) {
                     point_selected_surf_[i] = true;
-                    dynamic_scores(i) = abs(pabcd_st(3));
+                    dynamic_scores(i) = 0.0;
                 } else {
-                    point_selected_surf_[i] = false;
-                    dynamic_scores(i) = abs(pabcd_st(3));
+                    ikdtree.Nearest_Search(point_world, match_points_num, points_near,
+                                           pointSearchSqDis);
+                    // esti_stPlane divides by (N-1); empty or single neighbor => UB / SIGSEGV
+                    if (points_near.size() < 4) {
+                        point_selected_surf_[i] = true;
+                        dynamic_scores(i) = 0.0;
+                    } else {
+                        VF(4) pabcd_st;
+                        VF(4) points_mean;
+                        if (!esti_stPlane(pabcd_st, points_mean, points_near, 0.1f)) {
+                            point_selected_surf_[i] = true;
+                            dynamic_scores(i) = 0.0;
+                        } else if (abs(pabcd_st(3)) <= vel_thre) {
+                            point_selected_surf_[i] = true;
+                            dynamic_scores(i) = abs(pabcd_st(3));
+                        } else {
+                            point_selected_surf_[i] = false;
+                            dynamic_scores(i) = abs(pabcd_st(3));
+                        }
+                    }
                 }
             }
         });
@@ -1146,9 +1164,20 @@ int main(int argc, char** argv)
     /*** variables definition ***/
     int effect_feat_num = 0, frame_num = 0;
     bool flg_EKF_converged, EKF_stop_flg = 0;
-    FILE *fp;
-    string pos_log_dir = root_dir + "/Log/pos_log.txt";
-    fp = fopen(pos_log_dir.c_str(),"w");
+    FILE *fp = nullptr;
+    const std::filesystem::path log_dir =
+        std::filesystem::path(root_dir) / "Log";
+    std::error_code fs_ec;
+    std::filesystem::create_directories(log_dir, fs_ec);
+    if (fs_ec) {
+        ROS_WARN("无法创建日志目录 %s : %s", log_dir.c_str(),
+                 fs_ec.message().c_str());
+    }
+    const std::string pos_log_dir = (log_dir / "pos_log.txt").string();
+    fp = fopen(pos_log_dir.c_str(), "w");
+    if (fp == nullptr) {
+        ROS_WARN("无法打开位姿日志文件（将跳过写入）: %s", pos_log_dir.c_str());
+    }
 
     _featsArray.reset(new PointCloudXYZI());
 

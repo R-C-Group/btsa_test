@@ -28,3 +28,10 @@ source devel/setup.bash
 sudo apt-get install libgoogle-glog-dev
 # 但系统自动安装的可能有问题，修复了“CMakeLists.txt”
 ``` 
+
+
+* 运行：
+```bash
+source devel/setup.bash
+roslaunch btsa dynamic.launch
+```

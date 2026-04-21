@@ -230,6 +230,11 @@ float calc_dist(PointType p1, PointType p2){
 template <typename T>
 bool esti_stPlane(Eigen::Matrix<T, 4, 1> &normal, Eigen::Matrix<T, 4, 1> &neighborhood_mean , const PointVector &point, const T &threshold = 0.1f) {
     const size_t N = point.size();
+    if (N < 2) {
+        normal.setZero();
+        neighborhood_mean.setZero();
+        return false;
+    }
     Eigen::Vector4f sum = Eigen::Vector4f::Zero();
     // First pass: compute the sum for the mean
     for (size_t j = 0; j < N; j++) {

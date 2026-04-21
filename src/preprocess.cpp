@@ -1,8 +1,19 @@
 #include "preprocess.h"
 #include "pcl/filters/impl/filter.hpp"
+#include <algorithm>
 
 #define RETURN0     0x00
 #define RETURN0AND1 0x10
+
+namespace {
+bool pointCloud2HasField(const sensor_msgs::PointCloud2ConstPtr &msg,
+                         const char *name) {
+  for (const auto &f : msg->fields) {
+    if (f.name == name) return true;
+  }
+  return false;
+}
+}  // namespace
 
 Preprocess::Preprocess()
   :feature_enabled(0), lidar_type(AVIA), blind(0.01), point_filter_num(1)
@@ -104,6 +115,48 @@ void Preprocess::sim_handler(const sensor_msgs::PointCloud2::ConstPtr &msg) {
   }
 }
 
+void Preprocess::livox_pc2_xyz_i_handler(
+    const sensor_msgs::PointCloud2::ConstPtr &msg) {
+  pl_surf.clear();
+  pl_surf_filtered.clear();
+  pl_corn.clear();
+  pl_full.clear();
+
+  pcl::PointCloud<pcl::PointXYZI> pl_orig;
+  pcl::fromROSMsg(*msg, pl_orig);
+  const int plsize = static_cast<int>(pl_orig.size());
+  if (plsize <= 0) return;
+
+  const float scan_ms =
+      static_cast<float>(1000.0 / std::max(1, SCAN_RATE));
+
+  pl_surf.reserve(plsize);
+  int valid_num = 0;
+  for (int i = 0; i < plsize; ++i) {
+    valid_num++;
+    if (valid_num % point_filter_num != 0) continue;
+
+    const auto &p = pl_orig.points[i];
+    const double range = p.x * p.x + p.y * p.y + p.z * p.z;
+    if (range < blind * blind) continue;
+    if ((std::abs(p.x) < 1e-7) && (std::abs(p.y) < 1e-7) &&
+        (std::abs(p.z) < 1e-7))
+      continue;
+
+    PointType added_pt;
+    added_pt.x = p.x;
+    added_pt.y = p.y;
+    added_pt.z = p.z;
+    added_pt.intensity = p.intensity;
+    added_pt.normal_x = 0;
+    added_pt.normal_y = 0;
+    added_pt.normal_z = 0;
+    added_pt.curvature =
+        (plsize > 1) ? (float(i) / float(plsize - 1)) * scan_ms : 0.f;
+    pl_surf.points.push_back(added_pt);
+  }
+}
+
 void Preprocess::livoxraw_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
 {
   pl_surf.clear();
@@ -111,6 +164,14 @@ void Preprocess::livoxraw_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
   pl_corn.clear();
   pl_full.clear();
   double t1 = omp_get_wtime();
+
+  const bool has_livox_meta =
+      pointCloud2HasField(msg, "offset_time") &&
+      pointCloud2HasField(msg, "line") && pointCloud2HasField(msg, "tag");
+  if (!has_livox_meta) {
+    livox_pc2_xyz_i_handler(msg);
+    return;
+  }
 
   pcl::PointCloud<livox_ros::Point> pl_orig;
   pcl::fromROSMsg(*msg, pl_orig);

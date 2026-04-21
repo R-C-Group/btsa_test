@@ -150,6 +150,8 @@ class Preprocess
 
   private:
   void livoxraw_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
+  /** Livox PointCloud2 without custom fields: parse as XYZI and assign synthetic time (ms). */
+  void livox_pc2_xyz_i_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg);
   void oust64_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
