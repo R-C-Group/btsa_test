@@ -162,6 +162,9 @@ class Preprocess
   vector<orgtype> typess[128]; //maximum 128 line lidar
   int lidar_type, point_filter_num, N_SCANS, SCAN_RATE;
   double blind;
+  /** RoboSense：雷达系 z 方向高度滤除（米），仅 robosense_handler 使用 */
+  double rs_height_min;
+  double rs_height_max;
   bool feature_enabled, given_offset_time;
   ros::Publisher pub_full, pub_surf, pub_corn;
     
@@ -176,6 +179,8 @@ class Preprocess
   void sim_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void aeva_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void robosense_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
+  /** 对当前 pl_surf 按 rs_height_min/max 滤 z，供速腾结构化路径与 XYZI 回退共用 */
+  void robosense_erase_outside_height();
   void give_feature(PointCloudXYZI &pl, vector<orgtype> &types);
   void pub_func(PointCloudXYZI &pl, const ros::Time &ct);
   int  plane_judge(const PointCloudXYZI &pl, vector<orgtype> &types, uint i, uint &i_nex, Eigen::Vector3d &curr_direct);

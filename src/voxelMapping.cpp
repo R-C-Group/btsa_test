@@ -1151,6 +1151,8 @@ int main(int argc, char** argv)
     nh.param<int>("publish/publish_max_voxel_layer", publish_max_voxel_layer, 0);
 
     nh.param<double>("preprocess/blind", p_pre->blind, 0.01);
+    nh.param<double>("preprocess/height_min", p_pre->rs_height_min, -2.0);
+    nh.param<double>("preprocess/height_max", p_pre->rs_height_max, 0.5);
     nh.param<int>("preprocess/lidar_type", p_pre->lidar_type, AVIA);
     nh.param<int>("preprocess/scan_line", p_pre->N_SCANS, 16);
     nh.param<int>("preprocess/scan_rate", p_pre->SCAN_RATE, 10);
