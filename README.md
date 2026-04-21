@@ -34,4 +34,7 @@ sudo apt-get install libgoogle-glog-dev
 ```bash
 source devel/setup.bash
 roslaunch btsa dynamic.launch
+
+# 速腾激光雷达
+roslaunch btsa robosense.launch 
 ```

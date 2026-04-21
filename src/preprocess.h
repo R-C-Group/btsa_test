@@ -11,7 +11,7 @@ using namespace std;
 typedef pcl::PointXYZINormal PointType;
 typedef pcl::PointCloud<PointType> PointCloudXYZI;
 
-enum LID_TYPE{AVIA = 1, VELO16, OUST64, LIVOXRAW, MARSIM, AEVA}; //{1, 2, 3, 4, 5, 6}
+enum LID_TYPE{AVIA = 1, VELO16, OUST64, LIVOXRAW, MARSIM, AEVA, ROBOSENSE}; //{1..7}
 enum Feature{Nor, Poss_Plane, Real_Plane, Edge_Jump, Edge_Plane, Wire, ZeroPoint};
 enum Surround{Prev, Next};
 enum E_jump{Nr_nor, Nr_zero, Nr_180, Nr_inf, Nr_blind};
@@ -126,6 +126,24 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(aeva_ros::Point,
     (std::uint8_t, line_index, line_index)
 )
 
+/*** RoboSense（速腾，与 FAST-LIVO2 一致：PointCloud2 含 timestamp / ring） ***/
+namespace robosense_ros {
+struct EIGEN_ALIGN16 Point {
+  PCL_ADD_POINT4D;
+  float intensity;
+  double timestamp;
+  std::uint16_t ring;
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+};
+}  // namespace robosense_ros
+POINT_CLOUD_REGISTER_POINT_STRUCT(robosense_ros::Point,
+    (float, x, x)
+    (float, y, y)
+    (float, z, z)
+    (float, intensity, intensity)
+    (double, timestamp, timestamp)
+    (std::uint16_t, ring, ring))
+
 class Preprocess
 {
   public:
@@ -157,6 +175,7 @@ class Preprocess
   void velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void sim_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void aeva_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
+  void robosense_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void give_feature(PointCloudXYZI &pl, vector<orgtype> &types);
   void pub_func(PointCloudXYZI &pl, const ros::Time &ct);
   int  plane_judge(const PointCloudXYZI &pl, vector<orgtype> &types, uint i, uint &i_nex, Eigen::Vector3d &curr_direct);

@@ -1,6 +1,7 @@
 #include "preprocess.h"
 #include "pcl/filters/impl/filter.hpp"
 #include <algorithm>
+#include <cmath>
 
 #define RETURN0     0x00
 #define RETURN0AND1 0x10
@@ -81,6 +82,10 @@ void Preprocess::process(const sensor_msgs::PointCloud2::ConstPtr &msg, PointClo
 
   case AEVA:
     aeva_handler(msg);
+    break;
+
+  case ROBOSENSE:
+    robosense_handler(msg);
     break;
 
   default:
@@ -795,6 +800,84 @@ void Preprocess::aeva_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
 
       pl_surf.points.push_back(added_pt);
     }
+  }
+}
+
+void Preprocess::robosense_handler(
+    const sensor_msgs::PointCloud2::ConstPtr &msg) {
+  pl_surf.clear();
+  pl_corn.clear();
+  pl_full.clear();
+  pl_surf_filtered.clear();
+
+  const bool has_ts = pointCloud2HasField(msg, "timestamp");
+  const bool has_ring = pointCloud2HasField(msg, "ring");
+  if (!has_ts || !has_ring) {
+    ROS_WARN_ONCE(
+        "RoboSense: PointCloud2 缺少 timestamp 或 ring（与速腾官方/ FAST-LIVO2 约定不一致）。"
+        "已回退为 XYZI + 合成时间；请确认 common/lid_topic 与 bag 一致。");
+    livox_pc2_xyz_i_handler(msg);
+    return;
+  }
+
+  pcl::PointCloud<robosense_ros::Point> pl_orig;
+  pcl::fromROSMsg(*msg, pl_orig);
+  std::vector<int> nan_idx;
+  pcl::removeNaNFromPointCloud(pl_orig, pl_orig, nan_idx);
+  const int plsize = static_cast<int>(pl_orig.size());
+  if (plsize <= 0) {
+    ROS_WARN_ONCE(
+        "RoboSense: fromROSMsg 后点数为 0。检查话题是否与 yaml 中 common/lid_topic 一致。");
+    livox_pc2_xyz_i_handler(msg);
+    return;
+  }
+
+  pl_surf.reserve(plsize);
+  const double time_head = pl_orig.points[0].timestamp;
+  if (std::isnan(time_head) || std::isinf(time_head)) {
+    ROS_WARN_ONCE("RoboSense: 首点 timestamp 无效，回退 XYZI + 合成时间。");
+    livox_pc2_xyz_i_handler(msg);
+    return;
+  }
+
+  for (int i = 0; i < plsize; ++i) {
+    if (i % point_filter_num != 0) continue;
+
+    const auto &pt = pl_orig.points[i];
+    const double x = pt.x, y = pt.y, z = pt.z;
+    const double dist_sqr = x * x + y * y + z * z;
+    const bool is_valid = (dist_sqr >= blind * blind) && !std::isnan(x) &&
+                          !std::isnan(y) && !std::isnan(z);
+    if (!is_valid) continue;
+
+    PointType added_pt;
+    added_pt.normal_x = 0;
+    added_pt.normal_y = 0;
+    added_pt.normal_z = 0;
+    added_pt.x = pt.x;
+    added_pt.y = pt.y;
+    added_pt.z = pt.z;
+    added_pt.intensity = pt.intensity;
+    added_pt.curvature = static_cast<float>((pt.timestamp - time_head) * 1000.0);
+    pl_surf.points.push_back(added_pt);
+  }
+
+  if (pl_surf.points.empty()) {
+    ROS_WARN_ONCE(
+        "RoboSense: 经 blind 过滤后无点（可调 preprocess/blind）；回退 XYZI + 合成时间。");
+    livox_pc2_xyz_i_handler(msg);
+    return;
+  }
+
+  std::sort(pl_surf.points.begin(), pl_surf.points.end(),
+            [](const PointType &a, const PointType &b) {
+              return a.curvature < b.curvature;
+            });
+
+  static bool rs_ok_logged = false;
+  if (!rs_ok_logged) {
+    rs_ok_logged = true;
+    ROS_INFO("RoboSense: 结构化解析成功，首帧有效点数 %zu", pl_surf.points.size());
   }
 }
 

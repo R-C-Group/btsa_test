@@ -531,6 +531,12 @@ void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
 
     PointCloudXYZI::Ptr  ptr(new PointCloudXYZI());
     p_pre->process(msg, ptr);
+    if (p_pre->lidar_type == ROBOSENSE && ptr->points.empty()) {
+      ROS_WARN_THROTTLE(
+          5.0,
+          "RoboSense 模式预处理后点云仍为空：请确认 common/lid_topic/common/imu_topic 与 "
+          "bag 一致；点云需含 x,y,z（无 timestamp/ring 时会自动回退 XYZI）。");
+    }
     lidar_buffer.push_back(ptr);
     time_buffer.push_back(msg->header.stamp.toSec() + time_offset);
     last_timestamp_lidar = msg->header.stamp.toSec() + time_offset;
