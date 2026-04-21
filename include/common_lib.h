@@ -227,6 +227,7 @@ float calc_dist(PointType p1, PointType p2){
     return d;
 }
 
+// 在 (x,y,z,t) 上估计局部平面：邻域点协方差的最小特征值对应法向 normal；|normal(3)| 用作动态打分（时间维偏离）。
 template <typename T>
 bool esti_stPlane(Eigen::Matrix<T, 4, 1> &normal, Eigen::Matrix<T, 4, 1> &neighborhood_mean , const PointVector &point, const T &threshold = 0.1f) {
     const size_t N = point.size();

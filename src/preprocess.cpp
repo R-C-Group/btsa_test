@@ -804,6 +804,7 @@ void Preprocess::aeva_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
   }
 }
 
+// 速腾：按雷达系 z 与 rs_height_min/max 过滤 pl_surf（与 yaml preprocess/height_* 对应）。
 void Preprocess::robosense_erase_outside_height() {
   auto &pts = pl_surf.points;
   pts.erase(std::remove_if(pts.begin(), pts.end(),
@@ -813,6 +814,8 @@ void Preprocess::robosense_erase_outside_height() {
             pts.end());
 }
 
+// 速腾 RoboSense：优先按 FAST-LIVO2 约定解析 timestamp+ring；缺字段或失败时回退 XYZI+合成时间。
+// 相对扫描首点的时间写入 curvature（ms），供 IMU_Processing 去畸变（curvature/1000 为秒）。
 void Preprocess::robosense_handler(
     const sensor_msgs::PointCloud2::ConstPtr &msg) {
   pl_surf.clear();

@@ -162,6 +162,13 @@ int publish_max_voxel_layer = 0;
 std::unordered_map<VOXEL_LOC, OctoTree *> voxel_map;
 
 // scan
+// ---------- 动态场景 / 动态点检测相关全局量（中文说明）----------
+// ikdtree：维护「历史帧」地图点的 ikd-Tree；在观测里对当前帧世界坐标点做近邻搜索，与局部平面比较以打分。
+// TimeWindow_Points：按帧缓存的世界系点云队列；超过 time_slice 后触发滑窗更新并开启 flg_dynamic_detect。
+// dynamic_scores：每个下采样点的「动态程度」标量；与 btsa/vel_thre 比较决定是否视为动态、是否参与 EKF 平面约束。
+// out_of_crop_index：裁剪盒外点标记为 1，动态检测阶段跳过（避免远处噪声干扰）。
+// feats_dynamic / feats_static_world / cloud_dynamic_refine：动态候选点、静态点、DBSCAN+SCC 后的动态点发布云。
+// voxel_hash_map_：时空体素一致性检查（SCC），剔除与静态体素重叠的误检动态簇。
 ikdtreeNS::KD_TREE<PointType> ikdtree;
 int time_slice;
 deque<PointVector>  TimeWindow_Points; 
@@ -205,6 +212,8 @@ shared_ptr<Preprocess> p_pre(new Preprocess());
 shared_ptr<ImuProcess> p_imu(new ImuProcess());
 
 //scan
+// 动态上采样：对「当前帧中被判为动态」的下采样点，在整帧去畸变世界系点云中找邻域，
+// 把邻域索引并入动态集合，从而在 feats_dynamic 中扩张动态区域（减少漏检）。
 void dynamic_detection_upsampling(){
     if (!flg_dynamic_detect) return;
     if (!feats_undistort_world || feats_undistort_world->empty()) return;
@@ -266,6 +275,8 @@ void dynamic_detection_upsampling(){
     }
 }
 
+// 空间一致性：对 feats_dynamic 做 DBSCAN 聚类；结合静态点云与 VoxelHashMap 做体素相交检验，
+// 剔除与静态结构重叠的簇（降低假阳性），通过检查的簇写入 cloud_dynamic_refine 用于发布。
 void SpatialConsistencyCheck(){
     if (!flg_dynamic_detect) return;
     if (!feats_dynamic || feats_dynamic->empty()) return;
@@ -415,6 +426,7 @@ void puslish_unstable_points(const ros::Publisher & pubLaserCloudUnstable)
     }
 }
 
+// 将当前 LIO 状态（时间、位置、姿态四元数）追加写入 Log/pos_log.txt；fp 为空则跳过（避免崩溃）。
 inline void dump_lio_state_to_log(FILE *fp)  
 {
     if (fp == nullptr) return;
@@ -483,6 +495,8 @@ void RGBpointBodyToWorld(PointType const * const pi, PointType * const po)
     po->intensity = pi->intensity;
 }
 
+// 激光地图时间滑窗：累积帧数超过 time_slice 后，(1) 打开动态检测总开关 flg_dynamic_detect；
+// (2) 从 ikdtree 删除最旧一帧点，保持地图时间厚度；(3) 生成当前帧去畸变点云的世界系副本供动态模块使用。
 void lasermap_timeslice_segment(){
     if(TimeWindow_Points.size() > time_slice){
         {
@@ -633,6 +647,8 @@ void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
 
 double lidar_mean_scantime = 0.0;
 int    scan_num = 0;
+// 同步一包激光与其时间范围内的 IMU：根据点曲率（存的是 ms 级相对扫描时间）估计扫描结束时刻，
+// 再从 imu_buffer 中弹出 [beg, lidar_end_time) 的 IMU 序列，供 IMU 初始化与去畸变使用。
 bool sync_packages(MeasureGroup &meas)
 {
     if (lidar_buffer.empty() || imu_buffer.empty()) {
@@ -922,6 +938,11 @@ M3D transformLiDARCovToWorld(Eigen::Vector3d &p_lidar, const esekfom::esekf<stat
 
 }
 
+// EKF 观测模型（共享形式）：先用体素地图 BuildResidualListOMP 匹配平面；在此之前，
+// 当 stop_detect 仍为 false 时，对每个下采样点在世界系 ikdtree 中找近邻，
+// 用 esti_stPlane 拟合 (x,y,z,t) 四维局部平面，|pabcd_st(3)| 作为「偏离静态流形」的动态分数 dynamic_scores；
+// 大于 vel_thre 的点置 point_selected_surf_=false，使其不参与当帧平面残差（抑制动态物体拖影）。
+// 每次进入本函数 detect_cnt++；超过 detect_cnt_thre 后置 stop_detect=true，仅影响本帧 EKF 后续迭代（帧首会重置）。
 void observation_model_share(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_data)
 {
 
@@ -1314,6 +1335,7 @@ int main(int argc, char** argv)
             }
 
             /*** downsample the feature points in a scan ***/
+            // 将点相对时间 curvature（ms）平移到「相对首帧雷达时刻」的全局时间轴，便于跨帧排序与滑窗。
             for (size_t i = 0; i < feats_undistort->points.size(); ++i) {
                 feats_undistort->points[i].curvature += (Measures.lidar_beg_time - first_lidar_time) * 1000;
             }
@@ -1329,6 +1351,7 @@ int main(int argc, char** argv)
             //     std::cout << "Not enough points to print time information." << std::endl;
             // }
             
+            // 体素下采样得到 feats_down_body；out_of_crop_index 标记范围外点，动态检测时跳过。
             downSizeFilterSurf.setInputCloud(feats_undistort);
             downSizeFilterSurf.filter(*feats_down_body);
             sort(feats_down_body->points.begin(), feats_down_body->points.end(), time_list);
@@ -1359,7 +1382,7 @@ int main(int argc, char** argv)
             }
             // ===============================================================================================================
             /*** iterated state estimation ***/
-            
+            // 每帧重置动态掩码与分数；EKF 更新内部调用 observation_model_share 写入 dynamic_scores / point_selected_surf_。
             double t_update_start = omp_get_wtime();
             double solve_H_time = 0;
             point_selected_surf_.resize(feats_down_size, true);
@@ -1381,7 +1404,7 @@ int main(int argc, char** argv)
             geoQuat.w = state_point.rot.coeffs()[3];
 //
             /*** add the points to the voxel map ***/
-            
+            // 将当前帧下采样点变换到世界系 world_lidar，更新体素地图；同时推入 TimeWindow_Points 并维护 ikdtree。
             std::vector<pointWithCov> pv_list;
             PointCloudXYZI::Ptr world_lidar(new PointCloudXYZI);
             transformLidar(state_point, feats_down_body, world_lidar);
