@@ -11,9 +11,9 @@ preprocess:
     # 7 = ROBOSENSE（速腾 PointCloud2：x,y,z,intensity,timestamp,ring）
     lidar_type: 7
     # 线数按机型修改：RS16=16，RS32=32，RS128=128 等
-    scan_line: 32
+    scan_line: 96
     scan_rate: 10
-    blind: 0.5
+    blind: 0.8
     point_filter_num: 1
     # 速腾：雷达坐标系 z（高度）滤除，单位米
     height_min: -2.0
@@ -31,7 +31,7 @@ mapping:
     fov_degree:    360
     det_range:     100.0
     extrinsic_est_en:  false
-    extrinsic_T: [ 0, 0, 0 ]
+    extrinsic_T: [0.00425, 0.00418, 0.00446]
     extrinsic_R: [ 1, 0, 0,
                    0, 1, 0,
                    0, 0, 1 ]
@@ -41,8 +41,8 @@ noise_model:
     angle_cov: 0.05
     acc_cov: 0.5
     gyr_cov: 0.25
-    b_acc_cov: 0.0043
-    b_gyr_cov: 0.000266
+    b_acc_cov: 0.0001
+    b_gyr_cov: 0.0001
 
 publish:
     pub_voxel_map: false
