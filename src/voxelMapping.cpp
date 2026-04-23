@@ -278,8 +278,19 @@ void dynamic_detection_upsampling(){
 // 空间一致性：对 feats_dynamic 做 DBSCAN 聚类；结合静态点云与 VoxelHashMap 做体素相交检验，
 // 剔除与静态结构重叠的簇（降低假阳性），通过检查的簇写入 cloud_dynamic_refine 用于发布。
 void SpatialConsistencyCheck(){
-    if (!flg_dynamic_detect) return;
-    if (!feats_dynamic || feats_dynamic->empty()) return;
+    if (!flg_dynamic_detect) {
+        cloud_dynamic_refine->clear();
+        cloud_dynamic_refine->width = 0;
+        cloud_dynamic_refine->height = 1;
+        return;
+    }
+    if (!feats_dynamic || feats_dynamic->empty()) {
+        // 本帧无动态候选时仍清空精炼结果，避免 RViz 一直显示上一帧的 /cloud_dynamic。
+        cloud_dynamic_refine->clear();
+        cloud_dynamic_refine->width = 0;
+        cloud_dynamic_refine->height = 1;
+        return;
+    }
     pcl::search::KdTree<PointType>::Ptr tree(new pcl::search::KdTree<PointType>);
     tree->setInputCloud(feats_dynamic);
 
@@ -358,6 +369,7 @@ void SpatialConsistencyCheck(){
     cloud_clustered->width = cloud_clustered->points.size();
     cloud_clustered->height = 1;
 
+    // 从「上采样划分得到的静态稠密点」feats_static_world 中去掉与动态簇空间相邻的假阴性索引，避免静态体素被运动簇污染。
     pcl::ExtractIndices<PointType> extract;
     extract.setInputCloud(feats_static_world);
     extract.setIndices(false_negatives);
@@ -396,15 +408,20 @@ void SpatialConsistencyCheck(){
             }
         }
     }
+    cloud_dynamic_refine->width = static_cast<uint32_t>(cloud_dynamic_refine->points.size());
+    cloud_dynamic_refine->height = 1;
     voxel_hash_map_.RemovePointsFarFromTime(lidar_end_time, scc_voxel_time_);
 }
 
+// 发布 DBSCAN + SCC 精炼后的「动态」点云，topic：/cloud_dynamic。点数经常很少或为空：多数簇在 SCC 中与静态体素重叠被判为静态而丢弃（与 /cloud_unstable 的「打分阈值点」不是同一集合）。
 void publish_dynamic_points(const ros::Publisher & pubLaserCloudDynamic)
 {
     if(scan_pub_en)
     {   
         sensor_msgs::PointCloud2 laserCloudmsg;
         PointCloudXYZI::Ptr laserCloudFullRes(cloud_dynamic_refine);
+        laserCloudFullRes->width = static_cast<uint32_t>(laserCloudFullRes->points.size());
+        laserCloudFullRes->height = 1;
         pcl::toROSMsg(*laserCloudFullRes, laserCloudmsg);
         laserCloudmsg.header.stamp = ros::Time().fromSec(lidar_end_time);
         laserCloudmsg.header.frame_id = "camera_init";
@@ -412,6 +429,20 @@ void publish_dynamic_points(const ros::Publisher & pubLaserCloudDynamic)
     }
 }
 
+// 发布 SCC 用到的「稠密静态」点云（上采样划分 + 去掉与动态簇相邻的假阴性静态点之后），topic：/cloud_static；仅在 flg_dynamic_detect 为真时与动态管线一致。
+void publish_static_points(const ros::Publisher & pubLaserCloudStatic)
+{
+    if (!scan_pub_en || !flg_dynamic_detect || !feats_static_world) return;
+    sensor_msgs::PointCloud2 laserCloudmsg;
+    feats_static_world->width = static_cast<uint32_t>(feats_static_world->points.size());
+    feats_static_world->height = 1;
+    pcl::toROSMsg(*feats_static_world, laserCloudmsg);
+    laserCloudmsg.header.stamp = ros::Time().fromSec(lidar_end_time);
+    laserCloudmsg.header.frame_id = "camera_init";
+    pubLaserCloudStatic.publish(laserCloudmsg);
+}
+
+// 发布当帧 world_lidar 中下采样点里 dynamic_scores>=vel_thre 的集合（动态打分阈值判定的「不稳定」点），topic：/cloud_unstable；用于对照观察，非 SCC 后最终动态。
 void puslish_unstable_points(const ros::Publisher & pubLaserCloudUnstable)
 {
     if(flg_dynamic_detect)
@@ -530,6 +561,7 @@ void RGBpointBodyLidarToIMU(PointType const * const pi, PointType * const po)
     po->normal_x = pi->normal_x;
 }
 
+// 通用 PointCloud2 雷达回调：预处理入 lidar_buffer，时间戳可叠加 time_offset 以对齐 IMU。
 void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
 {
     auto time_offset = lidar_time_offset;
@@ -724,6 +756,8 @@ PointCloudXYZI::Ptr pcl_wait_pub(new PointCloudXYZI(500000, 1));
 PointCloudXYZI::Ptr pcl_wait_save(new PointCloudXYZI());
 
 
+// 将当前帧扫描（稠密 feats_undistort 或下采样 feats_down_body，由 dense_publish_en 决定）变换到世界系后发布到 /cloud_registered。
+// 注意：此处为「整帧」点云，未按动态剔除；与动态剔除更一致的稠密静态见话题 /cloud_static（需 flg_dynamic_detect 已开启）。
 void publish_frame_world(const ros::Publisher & pubLaserCloudFull)
 {
     if(scan_pub_en)
@@ -887,6 +921,7 @@ void publish_path(const ros::Publisher pubPath)
     }
 }
 
+// 将车体系（雷达系经外参到 IMU/机体后再用状态位姿）点云变换到 LIO 世界系（与 odom、path 一致的地图坐标）。
 void transformLidar(const state_ikfom &state_point, const PointCloudXYZI::Ptr &input_cloud, PointCloudXYZI::Ptr &trans_cloud)
 {
     trans_cloud->clear();
@@ -1234,6 +1269,10 @@ int main(int argc, char** argv)
         nh.subscribe(lid_topic, 200000, livox_pcl_cbk) : \
         nh.subscribe(lid_topic, 200000, standard_pcl_cbk);
     ros::Subscriber sub_imu = nh.subscribe(imu_topic, 200000, imu_cbk);
+    // ---------- ROS 发布话题说明（点云类）----------
+    // /cloud_registered：世界系整帧扫描（未减动态）；/cloud_registered_body：同帧在 body 系。
+    // /cloud_dynamic：SCC 后精炼动态（常为稀疏或空）；/cloud_static：稠密静态（与动态管线一致）。
+    // /cloud_unstable：dynamic_scores 阈值下的下采样不稳定点。
     ros::Publisher pubLaserCloudFull = nh.advertise<sensor_msgs::PointCloud2>
             ("/cloud_registered", 100000);
     ros::Publisher pubLaserCloudFull_body = nh.advertise<sensor_msgs::PointCloud2>
@@ -1254,6 +1293,8 @@ int main(int argc, char** argv)
             ("/cloud_unstable", 100000);
     ros::Publisher pubLaserCloudDynamic = nh.advertise<sensor_msgs::PointCloud2>
             ("/cloud_dynamic", 100000);
+    ros::Publisher pubLaserCloudStatic = nh.advertise<sensor_msgs::PointCloud2>
+            ("/cloud_static", 100000);
 //------------------------------------------------------------------------------------------------------
     // for Plane Map
     bool init_map = false;
@@ -1459,6 +1500,7 @@ int main(int argc, char** argv)
 //            map_incremental();
 //
             /******* Publish points *******/
+            // 依次：轨迹、整帧世界系扫描、body 系扫描、体素平面可视化；其后填充 feats_unstable 并发布动态/静态相关话题。
             if (path_en)                         publish_path(pubPath);
             if (scan_pub_en)      publish_frame_world(pubLaserCloudFull);
             if (scan_pub_en && scan_body_pub_en) publish_frame_body(pubLaserCloudFull_body);
@@ -1483,6 +1525,7 @@ int main(int argc, char** argv)
             // print the size of feats_unstable
             // std::cout << "Unstable points size: " << feats_unstable->points.size() << std::endl;
             puslish_unstable_points(pubLaserCloudUnstable);
+            publish_static_points(pubLaserCloudStatic);
             publish_dynamic_points(pubLaserCloudDynamic);
             // publish_effect_world(pubLaserCloudEffect);
             // publish_map(pubLaserCloudMap);
